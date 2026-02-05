@@ -137,10 +137,6 @@ uv run python scripts/run_integration_tests.py
 - Checks: initialize handshake, `tools/list` (all 8 tools), `tools/call list_models`, `tools/call generate`.
 - If Ollama is not running, `list_models` and `generate` still return (error message or timeout); the script verifies the protocol and tool wiring.
 
-## Docs and memory
-
-Project design and notes live in `.docs/` (gitignored). See `.docs/DESIGN.md` and `.docs/MCP_CONFIG.md` for details.
-
 ## License
 
 MIT
