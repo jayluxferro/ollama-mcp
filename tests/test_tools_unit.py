@@ -9,6 +9,26 @@ import server
 
 
 @pytest.mark.asyncio
+async def test_ollama_version_success() -> None:
+    with patch.object(
+        server,
+        "_request",
+        new_callable=AsyncMock,
+        return_value={"version": "0.12.6"},
+    ):
+        out = await server.ollama_version()
+    assert "0.12.6" in out and "reachable" in out
+
+
+@pytest.mark.asyncio
+async def test_ollama_version_http_error() -> None:
+    import httpx
+    with patch.object(server, "_request", new_callable=AsyncMock, side_effect=httpx.ConnectError("nope")):
+        out = await server.ollama_version()
+    assert "Ollama request failed" in out
+
+
+@pytest.mark.asyncio
 async def test_list_models_empty() -> None:
     with patch.object(server, "_request", new_callable=AsyncMock, return_value={"models": []}):
         out = await server.list_models()
@@ -172,22 +192,31 @@ async def test_embed_list_of_strings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_copy_model() -> None:
+    with patch.object(server, "_request", new_callable=AsyncMock, return_value={}):
+        out = await server.copy_model("llama3.2", "llama3.2-backup")
+    assert "Copied" in out and "llama3.2" in out and "llama3.2-backup" in out
+
+
+@pytest.mark.asyncio
 async def test_pull_model() -> None:
     with patch.object(
         server,
-        "_request",
+        "_request_pull_stream",
         new_callable=AsyncMock,
-        return_value={"status": "pulling"},
+        return_value={"status": "success"},
     ):
         out = await server.pull_model("llama3.2")
-    assert "pulling" in out
+    assert "Pull finished" in out and "success" in out
 
 
 @pytest.mark.asyncio
 async def test_pull_model_insecure() -> None:
-    with patch.object(server, "_request", new_callable=AsyncMock, return_value={"status": "ok"}) as m:
+    with patch.object(
+        server, "_request_pull_stream", new_callable=AsyncMock, return_value={"status": "ok"}
+    ) as m:
         await server.pull_model("x", insecure=True)
-    assert m.call_args.kwargs.get("json", {}).get("insecure") is True
+    assert m.call_args.args[1].get("insecure") is True
 
 
 @pytest.mark.asyncio

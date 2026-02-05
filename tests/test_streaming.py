@@ -52,6 +52,7 @@ def _make_client(stream_lines: list[str]) -> _MockClient:
 @pytest.mark.asyncio
 async def test_request_stream_accumulates_content() -> None:
     """Streaming generate-style NDJSON: each chunk has 'response'."""
+    server._http_client = None  # force _get_client() to create a new client (our mock)
     lines = [
         '{"model":"m","response":"Hello","done":false}',
         '{"model":"m","response":" world","done":false}',
@@ -70,6 +71,7 @@ async def test_request_stream_accumulates_content() -> None:
 @pytest.mark.asyncio
 async def test_request_stream_chat_message_content() -> None:
     """Streaming chat: each chunk has message.content."""
+    server._http_client = None
     lines = [
         '{"model":"m","message":{"content":"Hi","role":"assistant"},"done":false}',
         '{"model":"m","message":{"content":" there","role":"assistant"},"done":true}',
@@ -87,6 +89,7 @@ async def test_request_stream_chat_message_content() -> None:
 @pytest.mark.asyncio
 async def test_request_stream_includes_thinking() -> None:
     """Thinking from generate (top-level) is prepended."""
+    server._http_client = None
     lines = [
         '{"model":"m","thinking":"Hmm","response":"","done":false}',
         '{"model":"m","response":"Yes.","done":true}',

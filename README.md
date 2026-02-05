@@ -35,11 +35,16 @@ The server reads `OLLAMA_BASE_URL` from the environment. You can use a **`.env` 
 
    Use a different URL if Ollama runs elsewhere (e.g. `http://192.168.1.10:11434` or a Docker host).
 
+   Optional: set `OLLAMA_TIMEOUT=300` (seconds) for long-running generations or slow machines.
+
 3. When you run the server (`uv run server.py` or via your MCP client), it loads `.env` from the same directory as `server.py` before reading env vars.
 
 | Variable | Default | Description |
 |----------|--------|-------------|
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL (no trailing slash). |
+| `OLLAMA_TIMEOUT` | `120` | Timeout in seconds for Ollama HTTP requests (min 5). Increase for large models. |
+| `OLLAMA_STREAM_READ_TIMEOUT` | 3× timeout | Read timeout for streaming requests (chat/generate with `stream: true`). Set if long generations time out. |
+| `OLLAMA_MCP_LOG_LEVEL` | `INFO` | Server log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 
 You can still override these in the MCP client config (e.g. Cursor’s `env` block) or in your shell; those take precedence over `.env`.
 
@@ -82,7 +87,8 @@ To use a custom Ollama URL without a `.env` file, add an `env` block:
   "command": "uv",
   "args": ["--directory", "/ABSOLUTE/PATH/TO/ollama-mcp", "run", "server.py"],
   "env": {
-    "OLLAMA_BASE_URL": "http://192.168.1.10:11434"
+    "OLLAMA_BASE_URL": "http://192.168.1.10:11434",
+    "OLLAMA_TIMEOUT": "300"
   }
 }
 ```
@@ -111,12 +117,14 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 | Tool | Description |
 |------|-------------|
+| `ollama_version` | Check if Ollama is reachable and get its version (health check). |
 | `list_models` | List installed Ollama models |
 | `list_running_models` | List models currently loaded in memory |
 | `show_model` | Get details for a model (params, size, etc.) |
 | `chat` | Multi-turn chat (model + messages array). Optional `stream: true` to use Ollama streaming (full reply still returned). |
 | `generate` | Single-prompt completion. Optional `stream: true` to use Ollama streaming (full reply still returned). |
 | `embed` | Get embeddings (model + text or list of strings) |
+| `copy_model` | Copy an existing model to a new name (e.g. backup or variant). |
 | `pull_model` | Pull a model from the registry |
 | `delete_model` | Delete an installed model |
 
@@ -136,6 +144,9 @@ uv run python scripts/run_integration_tests.py
 
 - Checks: initialize handshake, `tools/list` (all 8 tools), `tools/call list_models`, `tools/call generate`.
 - If Ollama is not running, `list_models` and `generate` still return (error message or timeout); the script verifies the protocol and tool wiring.
+- Optional env: `OLLAMA_MCP_INTEGRATION_TIMEOUT` (default 15), `OLLAMA_MCP_INTEGRATION_GENERATE_TIMEOUT` (default 60) to tune timeouts.
+
+**CI:** `.github/workflows/test.yml` runs unit tests and the integration script on push/PR. No Ollama service is required (tests are mocked; integration script verifies protocol and tool wiring).
 
 ## License
 

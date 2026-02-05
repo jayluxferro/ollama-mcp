@@ -21,16 +21,49 @@ try:
 except ImportError:
     pass
 
-# Log to stderr only (stdio is used for MCP)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s %(name)s %(message)s",
-    stream=__import__("sys").stderr,
-)
+def _log_level() -> int:
+    raw = os.environ.get("OLLAMA_MCP_LOG_LEVEL", "INFO").upper()
+    return getattr(logging, raw, logging.INFO)
+
+
+_log_fmt = "%(levelname)s %(name)s %(message)s"
+_stderr = __import__("sys").stderr
+logging.basicConfig(level=_log_level(), format=_log_fmt, stream=_stderr)
 logger = logging.getLogger("ollama-mcp")
 
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_API = f"{OLLAMA_BASE.rstrip('/')}/api"
+
+
+def _timeout_sec() -> float:
+    raw = os.environ.get("OLLAMA_TIMEOUT", "120")
+    try:
+        return max(5.0, float(raw))
+    except ValueError:
+        return 120.0
+
+
+def _stream_read_timeout() -> float:
+    """Longer read timeout for streaming (chat/generate) so slow tokens don't trip the default."""
+    raw = os.environ.get("OLLAMA_STREAM_READ_TIMEOUT", "")
+    if raw:
+        try:
+            return max(5.0, float(raw))
+        except ValueError:
+            pass
+    return _timeout_sec() * 3
+
+
+# Lazy singleton HTTP client (reused for all requests)
+_http_client: httpx.AsyncClient | None = None
+
+
+async def _get_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=_timeout_sec())
+    return _http_client
+
 
 mcp = FastMCP("ollama")
 
@@ -45,12 +78,12 @@ async def _request(
     **kwargs: Any,
 ) -> dict[str, Any] | list[Any]:
     url = _api_url(path)
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.request(method, url, **kwargs)
-        resp.raise_for_status()
-        if resp.content:
-            return resp.json()
-        return {}
+    client = await _get_client()
+    resp = await client.request(method, url, **kwargs)
+    resp.raise_for_status()
+    if resp.content:
+        return resp.json()
+    return {}
 
 
 async def _request_stream(
@@ -63,32 +96,72 @@ async def _request_stream(
     payload = {**payload, "stream": True}
     content_parts: list[str] = []
     thinking_parts: list[str] = []
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        async with client.stream("POST", url, json=payload) as resp:
-            resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                # Thinking: chat has message.thinking, generate has top-level thinking (avoid double-count)
-                msg = chunk.get("message") or {}
-                if isinstance(msg, dict) and msg.get("thinking"):
-                    thinking_parts.append(msg["thinking"])
-                elif chunk.get("thinking"):
-                    thinking_parts.append(chunk["thinking"])
-                # Content: chat has message.content, generate has response
-                if isinstance(msg, dict) and content_key in msg:
-                    content_parts.append(msg[content_key] or "")
-                elif content_key in chunk:
-                    content_parts.append(chunk[content_key] or "")
+    client = await _get_client()
+    stream_timeout = httpx.Timeout(_stream_read_timeout())
+    async with client.stream("POST", url, json=payload, timeout=stream_timeout) as resp:
+        resp.raise_for_status()
+        async for line in resp.aiter_lines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            # Thinking: chat has message.thinking, generate has top-level thinking (avoid double-count)
+            msg = chunk.get("message") or {}
+            if isinstance(msg, dict) and msg.get("thinking"):
+                thinking_parts.append(msg["thinking"])
+            elif chunk.get("thinking"):
+                thinking_parts.append(chunk["thinking"])
+            # Content: chat has message.content, generate has response
+            if isinstance(msg, dict) and content_key in msg:
+                content_parts.append(msg[content_key] or "")
+            elif content_key in chunk:
+                content_parts.append(chunk[content_key] or "")
     content = "".join(content_parts)
     if thinking_parts:
         content = f"[Thinking] {' '.join(thinking_parts).strip()}\n\n{content}"
     return content
+
+
+async def _request_pull_stream(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Consume pull NDJSON stream and return the last chunk (status, digest, etc.)."""
+    url = _api_url(path)
+    payload = {**payload, "stream": True}
+    client = await _get_client()
+    stream_timeout = httpx.Timeout(_stream_read_timeout())
+    last: dict[str, Any] = {}
+    async with client.stream("POST", url, json=payload, timeout=stream_timeout) as resp:
+        resp.raise_for_status()
+        async for line in resp.aiter_lines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                chunk = json.loads(line)
+                last = chunk
+            except json.JSONDecodeError:
+                continue
+    return last
+
+
+# ---- Info ----
+
+@mcp.tool()
+async def ollama_version() -> str:
+    """Check if Ollama is reachable and return its version (e.g. for health checks).
+    Fails with a clear message if Ollama is not running or not reachable.
+    """
+    try:
+        data = await _request("GET", "version")
+        version = data.get("version", "unknown")
+        return f"Ollama is reachable at {OLLAMA_BASE}. Version: {version}"
+    except httpx.HTTPError as e:
+        return f"Ollama request failed: {e}. Is Ollama running at {OLLAMA_BASE}?"
+    except Exception as e:
+        logger.exception("ollama_version")
+        return f"Error: {e}"
 
 
 # ---- Models ----
@@ -240,8 +313,25 @@ async def embed(model: str, text: str | list[str]) -> str:
 # ---- Model lifecycle ----
 
 @mcp.tool()
+async def copy_model(source: str, destination: str) -> str:
+    """Copy an existing model to a new name (e.g. for a backup or variant).
+    Args:
+        source: Existing model name to copy from.
+        destination: New model name to create.
+    """
+    try:
+        await _request("POST", "copy", json={"source": source, "destination": destination})
+        return f"Copied model '{source}' to '{destination}'."
+    except httpx.HTTPError as e:
+        return f"Ollama request failed: {e}"
+    except Exception as e:
+        logger.exception("copy_model")
+        return f"Error: {e}"
+
+
+@mcp.tool()
 async def pull_model(name: str, insecure: bool = False) -> str:
-    """Pull a model from the registry (e.g. llama3.2, gemma3). May take a while.
+    """Pull a model from the registry (e.g. llama3.2, gemma3). Consumes the full stream and returns the final status.
     Args:
         name: Model name to pull (e.g. llama3.2, mistral).
         insecure: Allow insecure connections to the registry.
@@ -250,9 +340,13 @@ async def pull_model(name: str, insecure: bool = False) -> str:
         payload: dict[str, Any] = {"name": name}
         if insecure:
             payload["insecure"] = True
-        data = await _request("POST", "pull", json=payload)
+        data = await _request_pull_stream("pull", payload)
         status = data.get("status", "unknown")
-        return f"Pull status: {status}. Check Ollama for progress."
+        digest = data.get("digest", "")
+        out = f"Pull finished: {status}."
+        if digest:
+            out += f" (digest: {digest[:16]}...)" if len(digest) > 16 else f" (digest: {digest})"
+        return out
     except httpx.HTTPError as e:
         return f"Ollama request failed: {e}"
     except Exception as e:

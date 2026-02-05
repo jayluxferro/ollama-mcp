@@ -15,7 +15,22 @@ from pathlib import Path
 # Project root (parent of scripts/)
 ROOT = Path(__file__).resolve().parent.parent
 SERVER_PY = ROOT / "server.py"
-TIMEOUT_SEC = 15
+
+
+def _timeout_default() -> float:
+    raw = os.environ.get("OLLAMA_MCP_INTEGRATION_TIMEOUT", "15")
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return 15.0
+
+
+def _generate_timeout() -> float:
+    raw = os.environ.get("OLLAMA_MCP_INTEGRATION_GENERATE_TIMEOUT", "60")
+    try:
+        return max(5.0, float(raw))
+    except ValueError:
+        return 60.0
 
 
 def read_line_with_timeout(pipe, timeout: float) -> str | None:
@@ -32,8 +47,10 @@ def read_line_with_timeout(pipe, timeout: float) -> str | None:
     return result[0] if t.is_alive() is False else None
 
 
-def send_request(proc: subprocess.Popen, request: dict, timeout: float = TIMEOUT_SEC) -> dict | None:
+def send_request(proc: subprocess.Popen, request: dict, timeout: float | None = None) -> dict | None:
     """Send one JSON-RPC request and read one response line."""
+    if timeout is None:
+        timeout = _timeout_default()
     out = proc.stdin
     if out is None:
         return None
@@ -112,7 +129,18 @@ def main() -> int:
     else:
         tools = list_resp.get("result", {}).get("tools", [])
         names = [t.get("name") for t in tools if t.get("name")]
-        expected = {"list_models", "list_running_models", "show_model", "chat", "generate", "embed", "pull_model", "delete_model"}
+        expected = {
+            "ollama_version",
+            "list_models",
+            "list_running_models",
+            "show_model",
+            "chat",
+            "generate",
+            "embed",
+            "copy_model",
+            "pull_model",
+            "delete_model",
+        }
         missing = expected - set(names)
         if missing:
             errors.append(f"tools/list missing: {missing}")
@@ -121,7 +149,7 @@ def main() -> int:
 
     # 4. tools/call list_models (safe, no side effects)
     call_req = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_models", "arguments": {}}}
-    call_resp = send_request(proc, call_req, timeout=20)
+    call_resp = send_request(proc, call_req, timeout=max(20, _timeout_default()))
     if not call_resp:
         errors.append("tools/call list_models: no response")
     elif "error" in call_resp:
@@ -141,7 +169,7 @@ def main() -> int:
         "method": "tools/call",
         "params": {"name": "generate", "arguments": {"model": "llama3.2", "prompt": "Say 1", "stream": False}},
     }
-    gen_resp = send_request(proc, gen_req, timeout=60)
+    gen_resp = send_request(proc, gen_req, timeout=_generate_timeout())
     if not gen_resp:
         errors.append("tools/call generate: no response (timeout?)")
     elif "error" in gen_resp:
