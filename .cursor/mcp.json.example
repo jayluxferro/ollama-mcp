@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "ollama": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Volumes/Lux/dev/ml/mcp/ollama-mcp",
+        "run",
+        "server.py"
+      ]
+    }
+  }
+}
