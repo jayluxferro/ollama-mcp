@@ -142,7 +142,7 @@ uv run pytest tests/ -v
 uv run python scripts/run_integration_tests.py
 ```
 
-- Checks: initialize handshake, `tools/list` (all 8 tools), `tools/call list_models`, `tools/call generate`.
+- Checks: initialize handshake, `tools/list` (all available tools), `tools/call list_models`, `tools/call generate`.
 - If Ollama is not running, `list_models` and `generate` still return (error message or timeout); the script verifies the protocol and tool wiring.
 - Optional env: `OLLAMA_MCP_INTEGRATION_TIMEOUT` (default 15), `OLLAMA_MCP_INTEGRATION_GENERATE_TIMEOUT` (default 60) to tune timeouts.
 
