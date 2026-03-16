@@ -121,8 +121,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `list_models` | List installed Ollama models |
 | `list_running_models` | List models currently loaded in memory |
 | `show_model` | Get details for a model (params, size, etc.) |
-| `chat` | Multi-turn chat (model + messages array). Optional `stream: true` to use Ollama streaming (full reply still returned). |
-| `generate` | Single-prompt completion. Optional `stream: true` to use Ollama streaming (full reply still returned). |
+| `chat` | Multi-turn chat (model + messages array). Supports optional `options`, `format`, and `keep_alive` controls plus `stream: true` for Ollama streaming (full reply still returned). |
+| `generate` | Single-prompt completion. Supports optional `options`, `format`, and `keep_alive` controls plus `stream: true` for Ollama streaming (full reply still returned). |
 | `embed` | Get embeddings (model + text or list of strings) |
 | `copy_model` | Copy an existing model to a new name (e.g. backup or variant). |
 | `pull_model` | Pull a model from the registry |

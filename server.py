@@ -146,6 +146,23 @@ async def _request_pull_stream(path: str, payload: dict[str, Any]) -> dict[str, 
     return last
 
 
+def _apply_generation_controls(
+    payload: dict[str, Any],
+    *,
+    options: dict[str, Any] | None = None,
+    format: str | dict[str, Any] | None = None,
+    keep_alive: str | None = None,
+) -> dict[str, Any]:
+    """Attach optional Ollama generation controls to a request payload."""
+    if options:
+        payload["options"] = options
+    if format is not None:
+        payload["format"] = format
+    if keep_alive:
+        payload["keep_alive"] = keep_alive
+    return payload
+
+
 # ---- Info ----
 
 @mcp.tool()
@@ -227,21 +244,33 @@ async def chat(
     model: str,
     messages: list[dict[str, str]],
     stream: bool = False,
+    options: dict[str, Any] | None = None,
+    format: str | dict[str, Any] | None = None,
+    keep_alive: str | None = None,
 ) -> str:
     """Generate the next assistant message for a conversation (multi-turn).
     Args:
         model: Model name (e.g. llama3.2, gemma3).
         messages: List of message objects with 'role' and 'content', e.g. [{"role":"user","content":"Hello"}].
         stream: If true, Ollama streams tokens (we accumulate and return the full reply). If false, Ollama returns one JSON response.
+        options: Optional Ollama runtime options (for example temperature, seed, num_ctx).
+        format: Optional response format. Use "json" or a JSON schema object for structured outputs.
+        keep_alive: Optional Ollama keep_alive value (for example "30m" or "0").
     """
     try:
+        payload = _apply_generation_controls(
+            {"model": model, "messages": messages},
+            options=options,
+            format=format,
+            keep_alive=keep_alive,
+        )
         if stream:
             return await _request_stream(
                 "chat",
-                {"model": model, "messages": messages},
+                payload,
                 content_key="content",
             )
-        payload = {"model": model, "messages": messages, "stream": False}
+        payload["stream"] = False
         data = await _request("POST", "chat", json=payload)
         msg = data.get("message") or {}
         content = msg.get("content") or ""
@@ -261,6 +290,9 @@ async def generate(
     prompt: str,
     system: str | None = None,
     stream: bool = False,
+    options: dict[str, Any] | None = None,
+    format: str | dict[str, Any] | None = None,
+    keep_alive: str | None = None,
 ) -> str:
     """Generate a completion for a single prompt (no conversation history).
     Args:
@@ -268,9 +300,17 @@ async def generate(
         prompt: The user prompt text.
         system: Optional system prompt.
         stream: If true, Ollama streams tokens (we accumulate and return the full reply). If false, Ollama returns one JSON response.
+        options: Optional Ollama runtime options (for example temperature, seed, num_ctx).
+        format: Optional response format. Use "json" or a JSON schema object for structured outputs.
+        keep_alive: Optional Ollama keep_alive value (for example "30m" or "0").
     """
     try:
-        payload: dict[str, Any] = {"model": model, "prompt": prompt}
+        payload = _apply_generation_controls(
+            {"model": model, "prompt": prompt},
+            options=options,
+            format=format,
+            keep_alive=keep_alive,
+        )
         if system:
             payload["system"] = system
         if stream:

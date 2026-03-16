@@ -130,6 +130,27 @@ async def test_chat_stream() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_passes_generation_controls() -> None:
+    with patch.object(
+        server,
+        "_request",
+        new_callable=AsyncMock,
+        return_value={"message": {"role": "assistant", "content": "ok"}},
+    ) as m:
+        await server.chat(
+            "llama3.2",
+            [{"role": "user", "content": "Hi"}],
+            options={"temperature": 0.1, "seed": 7},
+            format="json",
+            keep_alive="30m",
+        )
+    payload = m.call_args.kwargs.get("json", {})
+    assert payload["options"] == {"temperature": 0.1, "seed": 7}
+    assert payload["format"] == "json"
+    assert payload["keep_alive"] == "30m"
+
+
+@pytest.mark.asyncio
 async def test_generate_non_stream() -> None:
     with patch.object(
         server,
@@ -152,6 +173,32 @@ async def test_generate_with_system() -> None:
         await server.generate("llama3.2", "Go", system="You are helpful.", stream=False)
     call = m.call_args
     assert call.kwargs.get("json", {}).get("system") == "You are helpful."
+
+
+@pytest.mark.asyncio
+async def test_generate_passes_generation_controls() -> None:
+    schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+    }
+    with patch.object(
+        server,
+        "_request",
+        new_callable=AsyncMock,
+        return_value={"response": '{"answer":"ok"}'},
+    ) as m:
+        await server.generate(
+            "llama3.2",
+            "Respond as JSON",
+            options={"temperature": 0, "num_ctx": 8192},
+            format=schema,
+            keep_alive="15m",
+        )
+    payload = m.call_args.kwargs.get("json", {})
+    assert payload["options"] == {"temperature": 0, "num_ctx": 8192}
+    assert payload["format"] == schema
+    assert payload["keep_alive"] == "15m"
 
 
 @pytest.mark.asyncio
