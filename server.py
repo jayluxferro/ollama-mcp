@@ -1,8 +1,19 @@
 """
 Ollama MCP server: exposes local Ollama API as MCP tools for Cursor, Claude, etc.
-Run with: uv run server.py
+
+Run with:
+  uv run server.py                          # stdio (default)
+  uv run server.py --transport sse          # SSE over HTTP
+  uv run server.py --transport streamable-http  # Streamable HTTP (MCP 2025-03-26)
+
+Options:
+  --transport  stdio | sse | streamable-http  (env: OLLAMA_MCP_TRANSPORT)
+  --host       bind address                   (env: OLLAMA_MCP_HOST, default 127.0.0.1)
+  --port       bind port                      (env: OLLAMA_MCP_PORT, default 8000)
+
 Use stderr for logging (stdio is used for MCP protocol).
 """
+import argparse
 import json
 import logging
 import os
@@ -33,6 +44,11 @@ logger = logging.getLogger("ollama-mcp")
 
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_API = f"{OLLAMA_BASE.rstrip('/')}/api"
+
+# HTTP/SSE server defaults (overridden by CLI args in main())
+_MCP_HOST = os.environ.get("OLLAMA_MCP_HOST", "127.0.0.1")
+_MCP_PORT = int(os.environ.get("OLLAMA_MCP_PORT", "8000"))
+_MCP_TRANSPORT = os.environ.get("OLLAMA_MCP_TRANSPORT", "stdio")
 
 
 def _timeout_sec() -> float:
@@ -65,7 +81,7 @@ async def _get_client() -> httpx.AsyncClient:
     return _http_client
 
 
-mcp = FastMCP("ollama")
+mcp = FastMCP("ollama", host=_MCP_HOST, port=_MCP_PORT)
 
 
 def _api_url(path: str) -> str:
@@ -370,8 +386,52 @@ async def delete_model(name: str) -> str:
         return f"Error: {e}"
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Ollama MCP server",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default=_MCP_TRANSPORT,
+        help="Transport protocol (default: %(default)s, env: OLLAMA_MCP_TRANSPORT)",
+    )
+    parser.add_argument(
+        "--host",
+        default=_MCP_HOST,
+        help="Bind host for HTTP/SSE transports (default: %(default)s, env: OLLAMA_MCP_HOST)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=_MCP_PORT,
+        help="Bind port for HTTP/SSE transports (default: %(default)s, env: OLLAMA_MCP_PORT)",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    mcp.run(transport="stdio")
+    args = _parse_args()
+
+    # Update host/port on the already-constructed mcp instance if overridden via CLI
+    mcp.settings.host = args.host
+    mcp.settings.port = args.port
+
+    transport = args.transport
+    if transport in ("sse", "streamable-http"):
+        logger.info(
+            "Starting Ollama MCP server (%s) on http://%s:%d",
+            transport,
+            args.host,
+            args.port,
+        )
+        if transport == "sse":
+            logger.info("SSE endpoint: http://%s:%d/sse", args.host, args.port)
+        else:
+            logger.info("MCP endpoint: http://%s:%d/mcp", args.host, args.port)
+
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
