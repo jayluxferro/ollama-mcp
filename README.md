@@ -159,8 +159,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `list_models` | List installed Ollama models |
 | `list_running_models` | List models currently loaded in memory |
 | `show_model` | Get details for a model (params, size, etc.) |
-| `chat` | Multi-turn chat (model + messages array). Optional `stream: true` to use Ollama streaming (full reply still returned). |
-| `generate` | Single-prompt completion. Optional `stream: true` to use Ollama streaming (full reply still returned). |
+| `chat` | Multi-turn chat (model + messages array). Supports optional `options`, `format`, and `keep_alive` controls plus `stream: true` for Ollama streaming (full reply still returned). |
+| `generate` | Single-prompt completion. Supports optional `options`, `format`, and `keep_alive` controls plus `stream: true` for Ollama streaming (full reply still returned). |
 | `embed` | Get embeddings (model + text or list of strings) |
 | `copy_model` | Copy an existing model to a new name (e.g. backup or variant). |
 | `pull_model` | Pull a model from the registry |
@@ -180,7 +180,7 @@ uv run pytest tests/ -v
 uv run python scripts/run_integration_tests.py
 ```
 
-- Checks: initialize handshake, `tools/list` (all 8 tools), `tools/call list_models`, `tools/call generate`.
+- Checks: initialize handshake, `tools/list` (all available tools), `tools/call list_models`, `tools/call generate`.
 - If Ollama is not running, `list_models` and `generate` still return (error message or timeout); the script verifies the protocol and tool wiring.
 - Optional env: `OLLAMA_MCP_INTEGRATION_TIMEOUT` (default 15), `OLLAMA_MCP_INTEGRATION_GENERATE_TIMEOUT` (default 60) to tune timeouts.
 
